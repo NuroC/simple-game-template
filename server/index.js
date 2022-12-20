@@ -1,6 +1,6 @@
-const express = require('express');
-const expressws = require('express-ws');
-const cors = require('cors');
+const express = require("express");
+const expressws = require("express-ws");
+const cors = require("cors");
 
 const app = express();
 
@@ -12,27 +12,12 @@ app.use(cors());
 
 let players = new Map();
 
-/*
-Protocol:
-0x0: request new id [] -> [id]
-0x1: new Player [id] -> [x, y, id]
-0x2: request player data -> [[x,y,id], [x,y,id], ...]
-0x3: sendMove [keyCode] -> [] (store new position in map)
-
-*/
-
-
-
-let packets = {
+const packets = {
     0x0: "initGame",
     0x1: "newPlayer",
     0x2: "requestPlayerData",
-    0x3: "sendMove"
-}
-
-let config = {
-
-}
+    0x3: "sendMove",
+};
 
 function generateID() {
     let id = Math.floor(Math.random() * 255);
@@ -44,117 +29,107 @@ function generateID() {
     }
 }
 
-
-
-app.ws('/ws', (ws, req) => {
+app.ws("/ws", (ws, req) => {
     let userid = null;
-    console.log('Client connected');
-    ws.on('message', msg => {
-        let buffer = new Uint8Array(msg).buffer;
-        let view = new DataView(buffer);
-        let packet = {
+    console.log("Client connected");
+
+    ws.on("message", (msg) => {
+        const buffer = new Uint8Array(msg).buffer;
+        const view = new DataView(buffer);
+        const packet = {
             type: view.getUint8(0),
-            data: buffer.slice(1)
+            data: buffer.slice(1),
+        };
+
+        const type = packets[packet.type];
+        if (!type) {
+            return;
         }
 
-        let type = packets[packet.type];
-        if (type) {
-            switch (type) {
-                case "initGame": {
-                    let id = userid = generateID();
+        switch (type) {
+            case "initGame": {
+                const id = userid = generateID();
+                const bfer = Buffer.alloc(2);
+                const view = new DataView(bfer.buffer);
 
-                    let bfer = Buffer.alloc(2);
-                    let view = new DataView(bfer.buffer);
+                view.setUint8(0, 0);
+                view.setUint8(1, id);
 
-                    view.setUint8(0, 0);
-                    view.setUint8(1, id);
+                ws.send(bfer);
 
-                    ws.send(bfer);
+                players.set(userid, []);
+                break;
+            }
+            case "newPlayer": {
+                const id = view.getUint8(1);
+                const x = 100;
+                const y = 100;
 
-                    players.set(userid, []);
-                    break;
-                }
-                case "newPlayer": {
-                    let id = view.getUint8(1);
-                    let x = 100;
-                    let y = 100;
+                const bfer = Buffer.alloc(4);
+                const vieww = new DataView(bfer.buffer);
 
-                    let bfer = Buffer.alloc(4);
+                vieww.setUint8(0, 1); // packet type
+                vieww.setUint8(1, id); // player id
+                vieww.setUint8(2, x); // x
+                vieww.setUint8(3, y); // y
 
-                    let vieww = new DataView(bfer.buffer);
+                players.set(id, [x, y]);
 
-                    vieww.setUint8(0, 1); // packet type
-                    vieww.setUint8(1, id); // player id
-                    vieww.setUint8(2, x); // x
-                    vieww.setUint8(3, y); // y
+                ws.send(bfer);
+                break;
+            }
 
-                    players.set(id, [x, y]);
+            case "requestPlayerData": {
+                const data = new ArrayBuffer(1 + players.size * 6); // 1 byte opcode, 2 bytes * id,x, y * players
+                const view = new DataView(data);
+                let i = 0;
+                view.setUint8(i++, 2);
 
-                    ws.send(bfer);
-                    break;
-                }
-
-                case "requestPlayerData": {
-                    let data = new ArrayBuffer(1 + players.size * 6) // 1 byte opcode, 2 bytes * id,x, y * players
-                    let view = new DataView(data)
-                    let i = 0
-                    view.setUint8(i++, 2)
-
-                    for (let [id, [x, y]] of players) {
-                        view.setUint16(i, id)
-                        i += 2
-                        view.setInt16(i, x)
-                        i += 2
-                        view.setInt16(i, y)
-                        i += 2
-                    }
-
-
-                    ws.send(data)
-                    break;
+                for (let [id, [x, y]] of players) {
+                    view.setUint16(i, id);
+                    i += 2;
+                    view.setInt16(i, x);
+                    i += 2;
+                    view.setInt16(i, y);
+                    i += 2;
                 }
 
-                case "sendMove": {
-                    let keyCode = view.getUint8(1);
-                    let x = players.get(userid)[0];
-                    let y = players.get(userid)[1];
+                ws.send(data);
+                break;
+            }
 
-                    switch (keyCode) {
-                        case 83: // w (up)
-                            y += 10;
-                            break;
-                        case 87: // s (down)
-                            y -= 10;
-                            break;
-                        case 65: // a (left)
-                            x -= 10;
-                            break;
-                        case 68: // d (right)
-                            x += 10;
-                            break;
+            case "sendMove": {
+                const keyCode = view.getUint8(1);
+                let [x, y] = players.get(userid);
 
-
-                    }
-
-                    players.set(userid, [x, y]);
-                    console.log(players);
+                switch (keyCode) {
+                    case 83: // w (up)
+                        y += 10;
+                        break;
+                    case 87: // s (down)
+                        y -= 10;
+                        break;
+                    case 65: // a (left)
+                        x -= 10;
+                        break;
+                    case 68: // d (right)
+                        x += 10;
+                        break;
                 }
+
+                players.set(userid, [x, y]);
+                console.log(players);
+                break;
             }
         }
-
-
-
     });
 
-    ws.on('close', () => {
-        console.log('Client disconnected');
+    ws.on("close", () => {
+        console.log("Client disconnected");
         players.delete(userid);
-        console.log(players);
     });
 });
-
 
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
 });
-
